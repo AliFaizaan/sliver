@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags: [".*"]
+  create:
+    tags:
+      - v*
     branches: [stage]
 
 jobs:
