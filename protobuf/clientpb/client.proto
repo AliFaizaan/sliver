@@ -44,6 +44,7 @@ message Session {
   bool Burned = 22;
   repeated string Extensions = 23;
   // string ConfigID = 24;
+  int64 PeerID = 25;
 }
 
 message Beacon {
@@ -67,13 +68,14 @@ message Beacon {
   bool IsDead = 18;
 
   string ProxyURL = 20;
-  int64 Interval = 21;
-  int64 Jitter = 22;
-  bool Burned = 23;
-  int64 NextCheckin = 24;
+  int64 ReconnectInterval = 21;
+  int64 Interval = 22;
+  int64 Jitter = 23;
+  bool Burned = 24;
+  int64 NextCheckin = 25;
 
-  int64 TasksCount = 25;
-  int64 TasksCountCompleted = 26;
+  int64 TasksCount = 26;
+  int64 TasksCountCompleted = 27;
 }
 
 message Beacons {
@@ -451,6 +453,18 @@ message CloseTunnelReq {
   uint64 TunnelID = 8 [jstype = JS_STRING];
 
   commonpb.Request Request = 9;
+}
+
+// [ Pivots ] ----------------------------------------
+message PivotGraphEntry {
+  int64 PeerID = 1;
+  Session Session = 2;
+  string Name = 3;
+  repeated PivotGraphEntry Children = 4;
+}
+
+message PivotGraph {
+  repeated PivotGraphEntry Children = 1;
 }
 
 // [ Events ] ----------------------------------------

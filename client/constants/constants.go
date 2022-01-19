@@ -211,6 +211,7 @@ const (
 	RegistryListSubStr    = "list-subkeys"
 	RegistryListValuesStr = "list-values"
 	RegistryCreateKeyStr  = "create"
+	RegistryDeleteKeyStr  = "delete"
 	PivotsStr             = "pivots"
 	WgConfigStr           = "wg-config"
 	WgSocksStr            = "wg-socks"

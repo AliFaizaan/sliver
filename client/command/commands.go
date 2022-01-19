@@ -2273,6 +2273,25 @@ func BindCommands(con *console.SliverConsoleClient) {
 		},
 	})
 	registryCmd.AddCommand(&grumble.Command{
+		Name:     consts.RegistryDeleteKeyStr,
+		Help:     "Remove a registry key",
+		LongHelp: help.GetHelpFor([]string{consts.RegistryDeleteKeyStr}),
+		Args: func(a *grumble.Args) {
+			a.String("registry-path", "registry path")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			registry.RegDeleteKeyCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		Flags: func(f *grumble.Flags) {
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+			f.String("H", "hive", "HKCU", "registry hive")
+			f.String("o", "hostname", "", "remote host to remove value from")
+		},
+	})
+	registryCmd.AddCommand(&grumble.Command{
 		Name:     consts.RegistryListSubStr,
 		Help:     "List the sub keys under a registry key",
 		LongHelp: help.GetHelpFor([]string{consts.RegistryListSubStr}),
@@ -2399,6 +2418,24 @@ func BindCommands(con *console.SliverConsoleClient) {
 		Run: func(ctx *grumble.Context) error {
 			con.Println()
 			pivots.PivotDetailsCmd(ctx, con)
+			con.Println()
+			return nil
+		},
+		HelpGroup: consts.SliverHelpGroup,
+	})
+
+	pivotsCmd.AddCommand(&grumble.Command{
+		Name:     "graph",
+		Help:     "Get details of a pivot listener",
+		LongHelp: help.GetHelpFor([]string{consts.PivotsStr, "graph"}),
+		Flags: func(f *grumble.Flags) {
+			f.Int("i", "id", 0, "id of the pivot listener to stop")
+
+			f.Int("t", "timeout", defaultTimeout, "command timeout in seconds")
+		},
+		Run: func(ctx *grumble.Context) error {
+			con.Println()
+			pivots.PivotsGraphCmd(ctx, con)
 			con.Println()
 			return nil
 		},
