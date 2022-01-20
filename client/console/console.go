@@ -165,7 +165,8 @@ func (con *SliverConsoleClient) EventLoop() {
 			eventMsg := fmt.Sprintf(Bold+"WARNING: %s%s has been burned (DNS Canary)\n", Normal, event.Session.Name)
 			sessions := con.GetSessionsByName(event.Session.Name)
 			for _, session := range sessions {
-				con.PrintEventErrorf(eventMsg+"\n"+Clearln+"\t🔥 Session #%d is affected\n", session.ID)
+				shortID := strings.Split(session.ID, "-")[0]
+				con.PrintEventErrorf(eventMsg+"\n"+Clearln+"\t🔥 Session %s is affected\n", shortID)
 			}
 
 		case consts.WatchtowerEvent:
@@ -173,7 +174,8 @@ func (con *SliverConsoleClient) EventLoop() {
 			eventMsg := fmt.Sprintf(Bold+"WARNING: %s%s has been burned (seen on %s)\n", Normal, event.Session.Name, msg)
 			sessions := con.GetSessionsByName(event.Session.Name)
 			for _, session := range sessions {
-				con.PrintEventErrorf(eventMsg+"\n"+Clearln+"\t🔥 Session #%d is affected", session.ID)
+				shortID := strings.Split(session.ID, "-")[0]
+				con.PrintEventErrorf(eventMsg+"\n"+Clearln+"\t🔥 Session %s is affected", shortID)
 			}
 
 		case consts.JoinedEvent:
@@ -188,8 +190,9 @@ func (con *SliverConsoleClient) EventLoop() {
 		case consts.SessionOpenedEvent:
 			session := event.Session
 			currentTime := time.Now().Format(time.RFC1123)
-			con.PrintEventInfof("Session #%d %s - %s (%s) - %s/%s - %v",
-				session.ID, session.Name, session.RemoteAddress, session.Hostname, session.OS, session.Arch, currentTime)
+			shortID := strings.Split(session.ID, "-")[0]
+			con.PrintEventInfof("Session %s %s - %s (%s) - %s/%s - %v",
+				shortID, session.Name, session.RemoteAddress, session.Hostname, session.OS, session.Arch, currentTime)
 
 			// Prelude Operator
 			if prelude.SessionMapper != nil {
@@ -202,13 +205,15 @@ func (con *SliverConsoleClient) EventLoop() {
 		case consts.SessionUpdateEvent:
 			session := event.Session
 			currentTime := time.Now().Format(time.RFC1123)
-			con.PrintEventInfof("Session #%d has been updated - %v", session.ID, currentTime)
+			shortID := strings.Split(session.ID, "-")[0]
+			con.PrintEventInfof("Session %s has been updated - %v", shortID, currentTime)
 
 		case consts.SessionClosedEvent:
 			session := event.Session
 			currentTime := time.Now().Format(time.RFC1123)
-			con.PrintEventErrorf("Lost session #%d %s - %s (%s) - %s/%s - %v",
-				session.ID, session.Name, session.RemoteAddress, session.Hostname, session.OS, session.Arch, currentTime)
+			shortID := strings.Split(session.ID, "-")[0]
+			con.PrintEventErrorf("Lost session %s %s - %s (%s) - %s/%s - %v",
+				shortID, session.Name, session.RemoteAddress, session.Hostname, session.OS, session.Arch, currentTime)
 			activeSession := con.ActiveTarget.GetSession()
 			if activeSession != nil && activeSession.ID == session.ID {
 				con.ActiveTarget.Set(nil, nil)
@@ -228,7 +233,7 @@ func (con *SliverConsoleClient) EventLoop() {
 			proto.Unmarshal(event.Data, beacon)
 			currentTime := time.Now().Format(time.RFC1123)
 			shortID := strings.Split(beacon.ID, "-")[0]
-			con.PrintEventInfof("Beacon #%s %s - %s (%s) - %s/%s - %v",
+			con.PrintEventInfof("Beacon %s %s - %s (%s) - %s/%s - %v",
 				shortID, beacon.Name, beacon.RemoteAddress, beacon.Hostname, beacon.OS, beacon.Arch, currentTime)
 
 		case consts.BeaconTaskResultEvent:
@@ -294,7 +299,7 @@ func (con *SliverConsoleClient) triggerBeaconTaskCallback(data []byte) {
 
 	// If the callback is not in our map then we don't do anything, the beacon task
 	// was either issued by another operator in multiplayer mode or the client process
-	// was restarted between the time the task was created and the server go the result
+	// was restarted between the time the task was created and when the server got the result
 	con.BeaconTaskCallbacksMutex.Lock()
 	defer con.BeaconTaskCallbacksMutex.Unlock()
 	if callback, ok := con.BeaconTaskCallbacks[task.ID]; ok {
@@ -405,7 +410,7 @@ func (con *SliverConsoleClient) GetSession(arg string) *clientpb.Session {
 		return nil
 	}
 	for _, session := range sessions.GetSessions() {
-		if session.Name == arg || fmt.Sprintf("%d", session.ID) == arg {
+		if session.Name == arg || strings.HasPrefix(session.ID, arg) {
 			return session
 		}
 	}
