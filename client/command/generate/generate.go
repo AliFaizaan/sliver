@@ -62,8 +62,8 @@ const (
 
 	// DefaultReconnect is the default reconnect time
 	DefaultReconnect = 60
-	// DefaultPoll is the default poll interval
-	DefaultPoll = 1
+	// DefaultPollTimeout is the default poll timeout
+	DefaultPollTimeout = 360 // 6 minutes
 	// DefaultMaxErrors is the default max reconnection errors before giving up
 	DefaultMaxErrors = 1000
 )
@@ -82,31 +82,6 @@ var (
 		"windows/386":   true,
 		"windows/amd64": true,
 	}
-
-	// validFormats = []string{
-	// 	"bash",
-	// 	"c",
-	// 	"csharp",
-	// 	"dw",
-	// 	"dword",
-	// 	"hex",
-	// 	"java",
-	// 	"js_be",
-	// 	"js_le",
-	// 	"num",
-	// 	"perl",
-	// 	"pl",
-	// 	"powershell",
-	// 	"ps1",
-	// 	"py",
-	// 	"python",
-	// 	"raw",
-	// 	"rb",
-	// 	"ruby",
-	// 	"sh",
-	// 	"vbapplication",
-	// 	"vbscript",
-	// }
 )
 
 // GenerateCmd - The main command used to generate implant binaries
@@ -122,11 +97,21 @@ func GenerateCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 	compile(config, save, con)
 }
 
+func expandPath(path string) string {
+	// unless path starts with ~
+	if len(path) == 0 || path[0] != 126 {
+		return path
+	}
+
+	return filepath.Join(os.Getenv("HOME"), path[1:])
+}
+
 func saveLocation(save, DefaultName string) (string, error) {
 	var saveTo string
 	if save == "" {
 		save, _ = os.Getwd()
 	}
+	save = expandPath(save)
 	fi, err := os.Stat(save)
 	if os.IsNotExist(err) {
 		log.Printf("%s does not exist\n", save)
@@ -193,22 +178,46 @@ func parseCompileFlags(ctx *grumble.Context, con *console.SliverConsoleClient) *
 
 	c2s := []*clientpb.ImplantC2{}
 
-	mtlsC2 := parseMTLSc2(ctx.Flags.String("mtls"))
+	mtlsC2, err := ParseMTLSc2(ctx.Flags.String("mtls"))
+	if err != nil {
+		con.PrintErrorf("%s\n", err.Error())
+		return nil
+	}
 	c2s = append(c2s, mtlsC2...)
 
-	wgC2 := parseWGc2(ctx.Flags.String("wg"))
+	wgC2, err := ParseWGc2(ctx.Flags.String("wg"))
+	if err != nil {
+		con.PrintErrorf("%s\n", err.Error())
+		return nil
+	}
 	c2s = append(c2s, wgC2...)
 
-	httpC2 := parseHTTPc2(ctx.Flags.String("http"))
+	httpC2, err := ParseHTTPc2(ctx.Flags.String("http"))
+	if err != nil {
+		con.PrintErrorf("%s\n", err.Error())
+		return nil
+	}
 	c2s = append(c2s, httpC2...)
 
-	dnsC2 := parseDNSc2(ctx.Flags.String("dns"))
+	dnsC2, err := ParseDNSc2(ctx.Flags.String("dns"))
+	if err != nil {
+		con.PrintErrorf("%s\n", err.Error())
+		return nil
+	}
 	c2s = append(c2s, dnsC2...)
 
-	namedPipeC2 := parseNamedPipec2(ctx.Flags.String("named-pipe"))
+	namedPipeC2, err := ParseNamedPipec2(ctx.Flags.String("named-pipe"))
+	if err != nil {
+		con.PrintErrorf("%s\n", err.Error())
+		return nil
+	}
 	c2s = append(c2s, namedPipeC2...)
 
-	tcpPivotC2 := parseTCPPivotc2(ctx.Flags.String("tcp-pivot"))
+	tcpPivotC2, err := ParseTCPPivotc2(ctx.Flags.String("tcp-pivot"))
+	if err != nil {
+		con.PrintErrorf("%s\n", err.Error())
+		return nil
+	}
 	c2s = append(c2s, tcpPivotC2...)
 
 	var symbolObfuscation bool
@@ -235,7 +244,7 @@ func parseCompileFlags(ctx *grumble.Context, con *console.SliverConsoleClient) *
 	}
 
 	reconnectInterval := ctx.Flags.Int("reconnect")
-	pollInterval := ctx.Flags.Int("poll")
+	pollTimeout := ctx.Flags.Int("poll-timeout")
 	maxConnectionErrors := ctx.Flags.Int("max-errors")
 
 	limitDomainJoined := ctx.Flags.Bool("limit-domainjoined")
@@ -308,8 +317,8 @@ func parseCompileFlags(ctx *grumble.Context, con *console.SliverConsoleClient) *
 		WGKeyExchangePort: uint32(ctx.Flags.Int("key-exchange")),
 		WGTcpCommsPort:    uint32(ctx.Flags.Int("tcp-comms")),
 
-		ReconnectInterval:   uint32(reconnectInterval),
-		PollInterval:        uint32(pollInterval),
+		ReconnectInterval:   int64(reconnectInterval) * int64(time.Second),
+		PollTimeout:         int64(pollTimeout) * int64(time.Second),
 		MaxConnectionErrors: uint32(maxConnectionErrors),
 
 		LimitDomainJoined: limitDomainJoined,
@@ -349,11 +358,11 @@ func getTargets(targetOS string, targetArch string, con *console.SliverConsoleCl
 
 	target := fmt.Sprintf("%s/%s", targetOS, targetArch)
 	if _, ok := SupportedCompilerTargets[target]; !ok {
-		con.Printf("⚠️  Unsupported compiler target %s%s%s, but we can try to compile a Default implant.\n",
+		con.Printf("⚠️  Unsupported compiler target %s%s%s, but we can try to compile a generic implant.\n",
 			console.Bold, target, console.Normal,
 		)
-		con.Printf("⚠️  Default implants do not support all commands/features.\n")
-		prompt := &survey.Confirm{Message: "Compile a Default build?"}
+		con.Printf("⚠️  Generic implants do not support all commands/features.\n")
+		prompt := &survey.Confirm{Message: "Attempt to build generic implant?"}
 		var confirm bool
 		survey.AskOne(prompt, &confirm)
 		if !confirm {
@@ -364,49 +373,75 @@ func getTargets(targetOS string, targetArch string, con *console.SliverConsoleCl
 	return targetOS, targetArch
 }
 
-func parseMTLSc2(args string) []*clientpb.ImplantC2 {
+// ParseMTLSc2 - Parse mtls connection string arg
+func ParseMTLSc2(args string) ([]*clientpb.ImplantC2, error) {
 	c2s := []*clientpb.ImplantC2{}
 	if args == "" {
-		return c2s
-	}
-	for index, arg := range strings.Split(args, ",") {
-		uri := url.URL{Scheme: "mtls"}
-		uri.Host = arg
-		if uri.Port() == "" {
-			uri.Host = fmt.Sprintf("%s:%d", uri.Host, DefaultMTLSLPort)
-		}
-		c2s = append(c2s, &clientpb.ImplantC2{
-			Priority: uint32(index),
-			URL:      uri.String(),
-		})
-	}
-	return c2s
-}
-
-func parseWGc2(args string) []*clientpb.ImplantC2 {
-	c2s := []*clientpb.ImplantC2{}
-	if args == "" {
-		return c2s
+		return c2s, nil
 	}
 	for index, arg := range strings.Split(args, ",") {
 		arg = strings.ToLower(arg)
-		uri := url.URL{Scheme: "wg"}
-		uri.Host = arg
+		var uri *url.URL
+		var err error
+		if strings.HasPrefix(arg, "mtls://") {
+			uri, err = url.Parse(arg)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			uri, err = url.Parse(fmt.Sprintf("mtls://%s", arg))
+			if err != nil {
+				return nil, err
+			}
+		}
 		if uri.Port() == "" {
-			uri.Host = fmt.Sprintf("%s:%d", uri.Host, DefaultWGLPort)
+			uri.Host = fmt.Sprintf("%s:%d", uri.Hostname(), DefaultMTLSLPort)
 		}
 		c2s = append(c2s, &clientpb.ImplantC2{
 			Priority: uint32(index),
 			URL:      uri.String(),
 		})
 	}
-	return c2s
+	return c2s, nil
 }
 
-func parseHTTPc2(args string) []*clientpb.ImplantC2 {
+// ParseWGc2 - Parse wg connect string arg
+func ParseWGc2(args string) ([]*clientpb.ImplantC2, error) {
 	c2s := []*clientpb.ImplantC2{}
 	if args == "" {
-		return c2s
+		return c2s, nil
+	}
+	for index, arg := range strings.Split(args, ",") {
+		arg = strings.ToLower(arg)
+		var uri *url.URL
+		var err error
+		if strings.HasPrefix(arg, "mtls://") {
+			uri, err = url.Parse(arg)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			uri, err = url.Parse(fmt.Sprintf("mtls://%s", arg))
+			if err != nil {
+				return nil, err
+			}
+		}
+		if uri.Port() == "" {
+			uri.Host = fmt.Sprintf("%s:%d", uri.Hostname(), DefaultWGLPort)
+		}
+		c2s = append(c2s, &clientpb.ImplantC2{
+			Priority: uint32(index),
+			URL:      uri.String(),
+		})
+	}
+	return c2s, nil
+}
+
+// ParseHTTPc2 - Parse HTTP connection string arg
+func ParseHTTPc2(args string) ([]*clientpb.ImplantC2, error) {
+	c2s := []*clientpb.ImplantC2{}
+	if args == "" {
+		return c2s, nil
 	}
 	for index, arg := range strings.Split(args, ",") {
 		arg = strings.ToLower(arg)
@@ -415,14 +450,12 @@ func parseHTTPc2(args string) []*clientpb.ImplantC2 {
 		if strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://") {
 			uri, err = url.Parse(arg)
 			if err != nil {
-				log.Printf("Failed to parse C2 URL %s", err)
-				continue
+				return nil, err
 			}
 		} else {
 			uri, err = url.Parse(fmt.Sprintf("https://%s", arg))
 			if err != nil {
-				log.Printf("Failed to parse C2 URL %s", err)
-				continue
+				return nil, err
 			}
 		}
 		c2s = append(c2s, &clientpb.ImplantC2{
@@ -430,79 +463,109 @@ func parseHTTPc2(args string) []*clientpb.ImplantC2 {
 			URL:      uri.String(),
 		})
 	}
-	return c2s
+	return c2s, nil
 }
 
-func parseDNSc2(args string) []*clientpb.ImplantC2 {
+// ParseDNSc2 - Parse DNS connection string arg
+func ParseDNSc2(args string) ([]*clientpb.ImplantC2, error) {
 	c2s := []*clientpb.ImplantC2{}
 	if args == "" {
-		return c2s
+		return c2s, nil
 	}
 	for index, arg := range strings.Split(args, ",") {
-		uri := url.URL{Scheme: "dns"}
-		if len(arg) < 1 {
-			continue
-		}
-		// Make sure we have the FQDN
-		if !strings.HasSuffix(arg, ".") {
-			arg += "."
-		}
-		arg = strings.TrimPrefix(arg, ".")
-
-		uri.Host = arg
-		c2s = append(c2s, &clientpb.ImplantC2{
-			Priority: uint32(index),
-			URL:      uri.String(),
-		})
-	}
-	return c2s
-}
-
-func parseNamedPipec2(args string) []*clientpb.ImplantC2 {
-	c2s := []*clientpb.ImplantC2{}
-	if args == "" {
-		return c2s
-	}
-	for index, arg := range strings.Split(args, ",") {
-		uri, err := url.Parse("namedpipe://" + arg)
-		if len(arg) < 1 {
-			continue
-		}
-		if err != nil {
-			return c2s
+		arg = strings.ToLower(arg)
+		var uri *url.URL
+		var err error
+		if strings.HasPrefix(arg, "dns://") {
+			uri, err = url.Parse(arg)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			uri, err = url.Parse(fmt.Sprintf("dns://%s", arg))
+			if err != nil {
+				return nil, err
+			}
 		}
 		c2s = append(c2s, &clientpb.ImplantC2{
 			Priority: uint32(index),
 			URL:      uri.String(),
 		})
 	}
-	return c2s
+	return c2s, nil
 }
 
-func parseTCPPivotc2(args string) []*clientpb.ImplantC2 {
+// ParseNamedPipec2 - Parse named pipe connection string arg
+func ParseNamedPipec2(args string) ([]*clientpb.ImplantC2, error) {
 	c2s := []*clientpb.ImplantC2{}
 	if args == "" {
-		return c2s
+		return c2s, nil
 	}
 	for index, arg := range strings.Split(args, ",") {
+		arg = strings.ToLower(arg)
+		var uri *url.URL
+		var err error
+		if strings.HasPrefix(arg, "namedpipe://") {
+			uri, err = url.Parse(arg)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			uri, err = url.Parse(fmt.Sprintf("namedpipe://%s", arg))
+			if err != nil {
+				return nil, err
+			}
+		}
+		c2s = append(c2s, &clientpb.ImplantC2{
+			Priority: uint32(index),
+			URL:      uri.String(),
+		})
+	}
+	return c2s, nil
+}
 
-		uri := url.URL{Scheme: "tcppivot"}
-		uri.Host = arg
+// ParseTCPPivotc2 - Parse tcp pivot connection string arg
+func ParseTCPPivotc2(args string) ([]*clientpb.ImplantC2, error) {
+	c2s := []*clientpb.ImplantC2{}
+	if args == "" {
+		return c2s, nil
+	}
+	for index, arg := range strings.Split(args, ",") {
+		arg = strings.ToLower(arg)
+		var uri *url.URL
+		var err error
+		if strings.HasPrefix(arg, "tcp-pivot://") {
+			arg = strings.Replace(arg, "tcp-pivot://", "tcppivot://", 1)
+		}
+		if strings.HasPrefix(arg, "tcppivot://") {
+			uri, err = url.Parse(arg)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			uri, err = url.Parse(fmt.Sprintf("tcppivot://%s", arg))
+			if err != nil {
+				return nil, err
+			}
+		}
 		if uri.Port() == "" {
-			uri.Host = fmt.Sprintf("%s:%d", uri.Host, DefaultTCPPivotPort)
+			uri.Host = fmt.Sprintf("%s:%d", uri.Hostname(), DefaultTCPPivotPort)
 		}
 		c2s = append(c2s, &clientpb.ImplantC2{
 			Priority: uint32(index),
 			URL:      uri.String(),
 		})
 	}
-	return c2s
+	return c2s, nil
 }
 
 func compile(config *clientpb.ImplantConfig, save string, con *console.SliverConsoleClient) (*commonpb.File, error) {
-
-	con.PrintInfof("Generating new %s/%s implant binary\n", config.GOOS, config.GOARCH)
-
+	if config.IsBeacon {
+		interval := time.Duration(config.BeaconInterval)
+		con.PrintInfof("Generating new %s/%s beacon implant binary (%v)\n", config.GOOS, config.GOARCH, interval)
+	} else {
+		con.PrintInfof("Generating new %s/%s implant binary\n", config.GOOS, config.GOARCH)
+	}
 	if config.ObfuscateSymbols {
 		con.PrintInfof("%sSymbol obfuscation is enabled%s\n", console.Bold, console.Normal)
 	} else if !config.Debug {
@@ -572,7 +635,7 @@ func checkBuildTargetCompatibility(format clientpb.OutputFormat, targetOS string
 
 	compilers, err := con.Rpc.GetCompiler(context.Background(), &commonpb.Empty{})
 	if err != nil {
-		con.PrintWarnf("Failed to check target compatibility: %s\n", err)
+		con.PrintErrorf("Failed to check target compatibility: %s\n", err)
 		return true
 	}
 
@@ -607,7 +670,7 @@ func hasCC(targetOS string, targetArch string, crossCompilers []*clientpb.CrossC
 }
 
 func warnMissingCrossCompiler(format clientpb.OutputFormat, targetOS string, targetArch string, con *console.SliverConsoleClient) bool {
-	con.PrintWarnf("WARNING: Missing cross-compiler for %s on %s/%s\n", nameOfOutputFormat(format), targetOS, targetArch)
+	con.PrintWarnf("Missing cross-compiler for %s on %s/%s\n", nameOfOutputFormat(format), targetOS, targetArch)
 	switch targetOS {
 	case "windows":
 		con.PrintWarnf("The server cannot find an installation of mingw")

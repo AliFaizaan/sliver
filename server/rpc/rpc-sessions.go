@@ -57,7 +57,7 @@ func (rpc *Server) GetSessions(ctx context.Context, _ *commonpb.Empty) (*clientp
 }
 
 // KillSession - Kill a session
-func (rpc *Server) KillSession(ctx context.Context, kill *sliverpb.KillSessionReq) (*commonpb.Empty, error) {
+func (rpc *Server) KillSession(ctx context.Context, kill *sliverpb.KillReq) (*commonpb.Empty, error) {
 	session := core.Sessions.Get(kill.Request.SessionID)
 	if session == nil {
 		return &commonpb.Empty{}, ErrInvalidSessionID
@@ -92,17 +92,17 @@ func (rpc *Server) UpdateSession(ctx context.Context, update *clientpb.UpdateSes
 		}
 		session.Name = name
 	}
-	//Update reconnect interval if set
+	// Update reconnect interval if set
 	if update.ReconnectInterval != -1 {
-		session.ReconnectInterval = uint32(update.ReconnectInterval)
+		session.ReconnectInterval = update.ReconnectInterval
 
-		//Create protobuf msg
+		// Create protobuf msg
 		req := sliverpb.ReconnectIntervalReq{
 			Request: &commonpb.Request{
 				SessionID: session.ID,
 				Timeout:   int64(0),
 			},
-			ReconnectIntervalSeconds: uint32(update.ReconnectInterval),
+			ReconnectInterval: update.ReconnectInterval,
 		}
 
 		data, err := proto.Marshal(&req)
@@ -111,17 +111,17 @@ func (rpc *Server) UpdateSession(ctx context.Context, update *clientpb.UpdateSes
 		}
 		session.Request(sliverpb.MsgNumber(&req), rpc.getTimeout(&req), data)
 	}
-	//Update poll interval if set
+	// Update poll interval if set
 	if update.PollInterval != -1 {
-		session.PollInterval = uint32(update.PollInterval)
+		session.PollTimeout = update.PollInterval
 
-		//Create protobuf msg
+		// Create protobuf msg
 		req := sliverpb.PollIntervalReq{
 			Request: &commonpb.Request{
 				SessionID: session.ID,
 				Timeout:   int64(0),
 			},
-			PollIntervalSeconds: uint32(update.PollInterval),
+			PollInterval: update.PollInterval,
 		}
 
 		data, err := proto.Marshal(&req)
@@ -130,7 +130,45 @@ func (rpc *Server) UpdateSession(ctx context.Context, update *clientpb.UpdateSes
 		}
 		session.Request(sliverpb.MsgNumber(&req), rpc.getTimeout(&req), data)
 	}
+	if len(update.Extensions) != 0 {
+		session.Extensions = update.Extensions
+	}
 	core.Sessions.UpdateSession(session)
 	resp = session.ToProtobuf()
 	return resp, nil
+}
+
+// OpenSession - Instruct beacon to open a new session on next checkin
+func (rpc *Server) OpenSession(ctx context.Context, openSession *sliverpb.OpenSession) (*sliverpb.OpenSession, error) {
+	resp := &sliverpb.OpenSession{Response: &commonpb.Response{}}
+	err := rpc.GenericHandler(openSession, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// CloseSession - Close an interactive session, but do not kill the remote process
+func (rpc *Server) CloseSession(ctx context.Context, closeSession *sliverpb.CloseSession) (*commonpb.Empty, error) {
+	session := core.Sessions.Get(closeSession.Request.SessionID)
+	if session == nil {
+		return nil, ErrInvalidSessionID
+	}
+
+	// Make a best effort to tell the implant we're close the connection
+	// but its important we don't block on this as the user may be trying to
+	// close an unhealthy connection to the implant
+	closeWait := make(chan struct{})
+	go func() {
+		select {
+		case session.Connection.Send <- &sliverpb.Envelope{Type: sliverpb.MsgCloseSession}:
+		case <-time.After(time.Second * 3):
+		}
+		closeWait <- struct{}{}
+	}()
+
+	<-closeWait
+	core.Sessions.Remove(session.ID)
+
+	return &commonpb.Empty{}, nil
 }
