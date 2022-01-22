@@ -102,7 +102,7 @@ func ArmoryCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 		indexCache.Range(func(key, value interface{}) bool {
 			cacheEntry := value.(indexCacheEntry)
 			if cacheEntry.LastErr != nil {
-				con.PrintErrorf("%s: %s\n", cacheEntry.RepoURL, cacheEntry.LastErr)
+				con.PrintErrorf("%s - %s\n", cacheEntry.RepoURL, cacheEntry.LastErr)
 			}
 			return true
 		})
@@ -123,7 +123,7 @@ func ArmoryCmd(ctx *grumble.Context, con *console.SliverConsoleClient) {
 				if errorCount == 0 {
 					con.Printf("errors!\n")
 				}
-				con.PrintErrorf("%s: %s\n", cacheEntry.RepoURL, cacheEntry.LastErr)
+				con.PrintErrorf("%s - %s\n", cacheEntry.RepoURL, cacheEntry.LastErr)
 			} else {
 				if cacheEntry.Pkg.IsAlias {
 					aliases = append(aliases, cacheEntry.Alias)
@@ -193,14 +193,14 @@ func AliasExtensionOrBundleCompleter(prefix string, args []string, con *console.
 	results := []string{}
 	aliases, exts := packagesInCache()
 	bundles := bundlesInCache()
-	for _, alias := range aliases {
-		if strings.HasPrefix(alias.CommandName, prefix) {
-			results = append(results, alias.CommandName)
+	for _, aliasPkg := range aliases {
+		if strings.HasPrefix(aliasPkg.CommandName, prefix) {
+			results = append(results, aliasPkg.CommandName)
 		}
 	}
-	for _, extension := range exts {
-		if strings.HasPrefix(extension.CommandName, prefix) {
-			results = append(results, extension.CommandName)
+	for _, extensionPkg := range exts {
+		if strings.HasPrefix(extensionPkg.CommandName, prefix) {
+			results = append(results, extensionPkg.CommandName)
 		}
 	}
 	for _, bundle := range bundles {
@@ -221,13 +221,13 @@ func PrintArmoryPackages(aliases []*alias.AliasManifest, exts []*extensions.Exte
 		URL         string
 	}
 	entries := []pkgInfo{}
-	for _, alias := range aliases {
+	for _, aliasPkg := range aliases {
 		entries = append(entries, pkgInfo{
-			CommandName: alias.CommandName,
-			Version:     alias.Version,
+			CommandName: aliasPkg.CommandName,
+			Version:     aliasPkg.Version,
 			Type:        "Alias",
-			Help:        alias.Help,
-			URL:         alias.RepoURL,
+			Help:        aliasPkg.Help,
+			URL:         aliasPkg.RepoURL,
 		})
 	}
 	for _, extension := range exts {
@@ -359,7 +359,7 @@ func fetchIndex(armoryConfig *assets.ArmoryConfig, clientConfig ArmoryHTTPConfig
 		return
 	}
 	if repoURL.Scheme != "https" && repoURL.Scheme != "http" {
-		armoryResult.LastErr = errors.New("invalid URL scheme")
+		armoryResult.LastErr = errors.New("invalid repo url scheme in index")
 		return
 	}
 
@@ -372,7 +372,9 @@ func fetchIndex(armoryConfig *assets.ArmoryConfig, clientConfig ArmoryHTTPConfig
 	if index != nil {
 		armoryResult.Index = *index
 	}
-	armoryResult.LastErr = err
+	if err != nil {
+		armoryResult.LastErr = fmt.Errorf("failed to parse armory index: %s", err)
+	}
 }
 
 func fetchPackageSignatures(indexes []ArmoryIndex, clientConfig ArmoryHTTPConfig) {
@@ -410,11 +412,11 @@ func fetchPackageSignature(wg *sync.WaitGroup, armoryPkg *ArmoryPackage, clientC
 
 	repoURL, err := url.Parse(armoryPkg.RepoURL)
 	if err != nil {
-		pkgCacheEntry.LastErr = err
+		pkgCacheEntry.LastErr = fmt.Errorf("failed to parse repo url: %s", err)
 		return
 	}
 	if repoURL.Scheme != "https" && repoURL.Scheme != "http" {
-		pkgCacheEntry.LastErr = errors.New("invalid URL scheme")
+		pkgCacheEntry.LastErr = errors.New("invalid repo url scheme in pkg")
 		return
 	}
 
@@ -425,7 +427,7 @@ func fetchPackageSignature(wg *sync.WaitGroup, armoryPkg *ArmoryPackage, clientC
 		sig, _, err = DefaultArmoryPkgParser(armoryPkg, true, clientConfig)
 	}
 	if err != nil {
-		pkgCacheEntry.LastErr = err
+		pkgCacheEntry.LastErr = fmt.Errorf("failed to parse pkg manifest: %s", err)
 		return
 	}
 	if sig != nil {
@@ -440,7 +442,7 @@ func fetchPackageSignature(wg *sync.WaitGroup, armoryPkg *ArmoryPackage, clientC
 	if err == nil {
 		manifestData, err := base64.StdEncoding.DecodeString(sig.TrustedComment)
 		if err != nil {
-			pkgCacheEntry.LastErr = err
+			pkgCacheEntry.LastErr = fmt.Errorf("failed to b64 decode trusted comment: %s", err)
 			return
 		}
 		if armoryPkg.IsAlias {
@@ -448,6 +450,8 @@ func fetchPackageSignature(wg *sync.WaitGroup, armoryPkg *ArmoryPackage, clientC
 		} else {
 			pkgCacheEntry.Extension, err = extensions.ParseExtensionManifest(manifestData)
 		}
-		pkgCacheEntry.LastErr = err
+		if err != nil {
+			pkgCacheEntry.LastErr = fmt.Errorf("failed to parse trusted manifest in pkg signature: %s", err)
+		}
 	}
 }
